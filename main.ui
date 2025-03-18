@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>868</width>
+    <height>673</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="3" column="0">
+     <widget class="QTableWidget" name="tableWidget"/>
+    </item>
+    <item row="1" column="0">
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QPushButton" name="sensitiveBtn">
+        <property name="text">
+         <string>Столбец с чувствительным атрибутом</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="deleteCol">
+        <property name="text">
+         <string>Удалить столбцы</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="uniqueBtn">
+        <property name="text">
+         <string>Найти уникальные строки</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item row="0" column="0">
+     <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QLabel" name="label">
+        <property name="font">
+         <font>
+          <pointsize>9</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>k-анонимность</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="spinBox">
+        <property name="font">
+         <font>
+          <pointsize>9</pointsize>
+         </font>
+        </property>
+        <property name="maximum">
+         <number>5</number>
+        </property>
+        <property name="singleStep">
+         <number>2</number>
+        </property>
+        <property name="value">
+         <number>2</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_2">
+        <property name="font">
+         <font>
+          <pointsize>9</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>L-разнообразие</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="spinBox_2">
+        <property name="font">
+         <font>
+          <pointsize>9</pointsize>
+         </font>
+        </property>
+        <property name="maximum">
+         <number>5</number>
+        </property>
+        <property name="value">
+         <number>1</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>868</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="anonymization">
+    <property name="title">
+     <string>Методы</string>
+    </property>
+    <addaction name="noise"/>
+    <addaction name="action"/>
+    <addaction name="action_2"/>
+    <addaction name="action_3"/>
+    <addaction name="action_4"/>
+   </widget>
+   <widget class="QMenu" name="menu">
+    <property name="title">
+     <string>Файл</string>
+    </property>
+    <addaction name="openAction"/>
+    <addaction name="saveAction"/>
+   </widget>
+   <addaction name="anonymization"/>
+   <addaction name="menu"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="noise">
+   <property name="text">
+    <string>Добавить шум</string>
+   </property>
+  </action>
+  <action name="action">
+   <property name="text">
+    <string>Микроаггрегация</string>
+   </property>
+  </action>
+  <action name="action_2">
+   <property name="text">
+    <string>Локальное подавление</string>
+   </property>
+  </action>
+  <action name="action_3">
+   <property name="text">
+    <string>Пост-рандомизация</string>
+   </property>
+  </action>
+  <action name="action_4">
+   <property name="text">
+    <string>Обобщение</string>
+   </property>
+  </action>
+  <action name="openAction">
+   <property name="text">
+    <string>Открыть</string>
+   </property>
+  </action>
+  <action name="saveAction">
+   <property name="text">
+    <string>Сохранить</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
