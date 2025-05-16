@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
-import sys  # sys нужен для передачи argv в QApplication
+import sys
 
 import numpy as np
 import pandas as pd
+import ast
+import random
 from PyQt5 import QtCore
 from PyQt5 import QtWidgets
 from PyQt5.QtGui import QColor
@@ -18,13 +20,24 @@ import ui_noise
 
 class TabularData:
     def __init__(self, df):
+        for col in df.columns:
+            if pd.api.types.is_integer_dtype(df[col]) or pd.api.types.is_float_dtype(df[col]):
+                df[col] = df[col].astype(float)
+            elif pd.api.types.is_bool_dtype(df[col]):
+                df[col] = df[col].astype("boolean")
+            else:
+                df[col] = df[col].astype("object")
         self.df = df
         self.changed_columns = set()
+        self.sensitive_columns = set()
+        self.unique_values = None
 
     def get_unchanged_columns(self):
         return self.df[set(self.df) - self.changed_columns]
 
     def delete_column(self, col_name):
+        self.changed_columns.discard(col_name)
+        self.sensitive_columns.discard(col_name)
         self.df = self.df.drop(col_name, axis=1)
 
     def add_column(self, col_data, col_name):
@@ -46,6 +59,84 @@ class TabularData:
 
     def set_sensitive_attribute(self, col_name):
         self.changed_columns.add(col_name)
+        self.sensitive_columns.add(col_name)
+
+    def set_changed_column(self, col_name):
+        self.changed_columns.add(col_name)
+
+    def set_unique_values(self, unique_values):
+        self.unique_values = unique_values
+
+    def suppress_unique_values(self, col_name):
+        def safe_parse(val):
+            try:
+                parsed = ast.literal_eval(val)
+                if isinstance(parsed, list):
+                    return parsed
+                else:
+                    return []
+            except:
+                return []
+
+        if self.unique_values is None:
+            return
+        for idx in self.df.index:
+            allowed = safe_parse(self.unique_values.loc[idx])
+            if col_name in allowed:
+                self.df.at[idx, col_name] = np.nan
+
+    def microaggregate(self, col_name, round_digits=0):
+        group_cols = [col for col in self.df.columns if col != col_name and col not in self.sensitive_columns]
+
+        if pd.api.types.is_numeric_dtype(self.df[col_name]):
+            agg_func = lambda x: round(x.mean(), round_digits)
+        else:
+            agg_func = lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0]
+
+        aggregated = self.df.groupby(group_cols, dropna=False)[col_name].transform(agg_func)
+        self.df[col_name] = aggregated
+
+    def post_randomize(self, col_name, top_n=3, seed=None):
+        if seed is not None:
+            random.seed(seed)
+        top_values = self.df[col_name].value_counts().nlargest(top_n).index.tolist()
+
+        def safe_parse(val):
+            try:
+                parsed = ast.literal_eval(val)
+                if isinstance(parsed, list):
+                    return parsed
+            except:
+                pass
+            return []
+
+        for idx in self.df.index:
+            allowed_cols = safe_parse(self.unique_values.loc[idx])
+
+            if col_name in allowed_cols:
+                replacement = random.choice(top_values)
+                self.df.at[idx, col_name] = replacement
+
+    def generalize(self, col_name, df_hierarchy):
+        replacement_dict = dict(zip(df_hierarchy.iloc[:, 0], df_hierarchy.iloc[:, 1]))
+        self.df[col_name] = self.df[col_name].replace(replacement_dict)
+
+    def check_l_diversity(self, l=1):
+        if l == 1 or not len(self.sensitive_columns):
+            return set()
+        quasi_columns = [col for col in self.df.columns if col not in self.sensitive_columns]
+
+        grouped = self.df.groupby(quasi_columns, group_keys=False)
+        violating_indices = set()
+        for _, group in grouped:
+            unique_sensitive = group[self.sensitive_columns].drop_duplicates()
+            if len(unique_sensitive) < l:
+                violating_indices.update(group.index)
+
+        return violating_indices
+
+    def save(self, path):
+        self.df.to_csv(path, index=False)
 
 
 class ExceptWindow(QtWidgets.QDialog, ui_exception.Ui_exceptWindow):
@@ -108,12 +199,18 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
         # и т.д. в файле design.py
         super().__init__()
         self.data = None
+        self.hierarchy_data = None
         self.setupUi(self)  # Это нужно для инициализации нашего дизайна
         self.deleteCol.clicked.connect(self.delete_columns)
         self.uniqueBtn.clicked.connect(self.show_unique_rows)
         self.noise.triggered.connect(self.open_noise_window)
         self.openAction.triggered.connect(self.openFile)
+        self.saveAction.triggered.connect(self.saveFile)
         self.sensitiveBtn.clicked.connect(self.set_sensitive_attribute)
+        self.suppresion.triggered.connect(self.suppress_values)
+        self.microaggregation.triggered.connect(self.microaggregate)
+        self.randomization.triggered.connect(self.post_randomize)
+        self.generalization.triggered.connect(self.generalize)
 
         self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         # для быстрого тестирования
@@ -121,23 +218,13 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
 
     def set_sensitive_attribute(self):
         try:
-            selected = self.tableWidget.selectedRanges()
-            n_rows = self.tableWidget.rowCount()
-            for sel in selected:
-                if sel.rowCount() != n_rows:
-                    self.open_except_window("Выберите столбцы!")
-                    print("Выберите столбцы!")
-                    return
-            columns = set()
-            for index in self.tableWidget.selectedIndexes():
-                columns.add(index.column())
+            columns = self.get_selected_columns()
             self.update_table(self.data.df)
             for col in columns:
                 name = self.tableWidget.horizontalHeaderItem(col).text()
                 self.highlight_columns([name], (219, 158, 211))
                 self.data.set_sensitive_attribute(name)
         except Exception as ex:
-            print(ex)
             self.open_except_window(str(ex))
 
     def get_table_data(self):
@@ -153,7 +240,7 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
         df = pd.DataFrame(data, columns=col_names)
         return df
 
-    def highlight_unique_vals(self, unique_vals):
+    def highlight_unique_vals(self, unique_vals, violations):
         try:
             n_rows = self.tableWidget.rowCount()
             color = QColor(240, 202, 108, 127)
@@ -165,23 +252,32 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
                         col_n = self.get_column_index_by_name(val)
                         if col_n != -1:
                             self.tableWidget.item(row, col_n).setBackground(color)
+                if row in violations:
+                    for col_name in self.data.sensitive_columns:
+                        col_n = self.get_column_index_by_name(col_name)
+                        if col_n != -1:
+                            self.tableWidget.item(row, col_n).setBackground(color)
+            self.data.set_unique_values(unique_vals)
         except Exception as ex:
-            print(ex)
             self.open_except_window(str(ex))
 
     def add_column(self, column_data, column_name):
-        self.data.add_column(column_data, column_name)
-        col_n = self.tableWidget.columnCount()
-        self.tableWidget.setColumnCount(col_n + 1)
-        self.tableWidget.setHorizontalHeaderItem(col_n, QTableWidgetItem(column_name))
-        for row_index, row_val in enumerate(column_data):
-            self.tableWidget.setItem(row_index, col_n, QTableWidgetItem(str(row_val)))
+        try:
+            self.data.add_column(column_data, column_name)
+            col_n = self.tableWidget.columnCount()
+            self.tableWidget.setColumnCount(col_n + 1)
+            self.tableWidget.setHorizontalHeaderItem(col_n, QTableWidgetItem(column_name))
+            for row_index, row_val in enumerate(column_data):
+                self.tableWidget.setItem(row_index, col_n, QTableWidgetItem(str(row_val)))
+        except Exception as ex:
+            self.open_except_window(str(ex))
 
     def show_unique_rows(self):
-        unique_vals = suda_alg.suda2(self.data.get_unchanged_columns())
-        # self.add_column(unique_vals, "Уникальные значения")
+        unique_vals = suda_alg.suda2(self.data.get_unchanged_columns(), k=self.k_val.value() - 1)
+        violations = self.data.check_l_diversity(l=self.l_val.value())
         self.update_table(self.data.df)
-        self.highlight_unique_vals(unique_vals)
+        if unique_vals is not None:
+            self.highlight_unique_vals(unique_vals, violations)
 
     def get_column_index_by_name(self, col_name):
         n_cols = self.tableWidget.columnCount()
@@ -199,9 +295,12 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
                 self.tableWidget.item(row, col_n).setBackground(color)
             self.tableWidget.horizontalHeaderItem(col_n).setBackground(color)
 
-    def add_noise(self, options=None):
+    def get_selected_columns(self):
         selected = self.tableWidget.selectedRanges()
         n_rows = self.tableWidget.rowCount()
+        if not len(selected):
+            self.open_except_window("Выберите столбцы!")
+            return
         for sel in selected:
             if sel.rowCount() != n_rows:
                 self.open_except_window("Выберите столбцы!")
@@ -210,33 +309,79 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
         columns = set()
         for index in self.tableWidget.selectedIndexes():
             columns.add(index.column())
+        return columns
 
-        for col in columns:
-            self.data.add_noise(
-                self.tableWidget.horizontalHeaderItem(col).text(),
-                is_round=options['int'],
-                std=options['std'],
-                option=options['method'],
-                start=options['start'],
-                end=options['end'],
-            )
-        self.update_table(self.data.df)
+    def add_noise(self, options=None):
+        try:
+            columns = self.get_selected_columns()
+
+            for col in columns:
+                self.data.add_noise(
+                    self.tableWidget.horizontalHeaderItem(col).text(),
+                    is_round=options['int'],
+                    std=options['std'],
+                    option=options['method'],
+                    start=options['start'],
+                    end=options['end'],
+                )
+            self.update_table(self.data.df)
+        except Exception as ex:
+            self.open_except_window(str(ex))
+
+    def suppress_values(self):
+        try:
+            columns = self.get_selected_columns()
+
+            for col in columns:
+                self.data.suppress_unique_values(self.tableWidget.horizontalHeaderItem(col).text())
+            self.update_table(self.data.df)
+        except Exception as ex:
+            self.open_except_window(str(ex))
+
+    def microaggregate(self):
+        try:
+            columns = self.get_selected_columns()
+
+            for col in columns:
+                self.data.microaggregate(self.tableWidget.horizontalHeaderItem(col).text())
+            self.update_table(self.data.df)
+        except Exception as ex:
+            self.open_except_window(str(ex))
+
+    def post_randomize(self):
+        try:
+            columns = self.get_selected_columns()
+
+            for col in columns:
+                self.data.post_randomize(self.tableWidget.horizontalHeaderItem(col).text())
+            self.update_table(self.data.df)
+        except Exception as ex:
+            self.open_except_window(str(ex))
+
+    def generalize(self):
+        try:
+            self.open_hierarchy_file()
+            if self.hierarchy_data is None:
+                self.open_except_window("Ошибка чтения файла!")
+                return
+
+            columns = self.get_selected_columns()
+
+            for col in columns:
+                self.data.generalize(self.tableWidget.horizontalHeaderItem(col).text(), self.hierarchy_data.df)
+            self.update_table(self.data.df)
+        except Exception as ex:
+            self.open_except_window(str(ex))
 
     def delete_columns(self):
-        selected = self.tableWidget.selectedRanges()
-        n_rows = self.tableWidget.rowCount()
-        for sel in selected:
-            if sel.rowCount() != n_rows:
-                print("Выберите столбцы!")
-                self.open_except_window("Выберите столбцы!")
-                return
-        columns = set()
-        for index in self.tableWidget.selectedIndexes():
-            columns.add(index.column())
+        try:
+            columns = self.get_selected_columns()
 
-        for col in sorted(columns, reverse=True):
-            self.data.delete_column(self.tableWidget.horizontalHeaderItem(col).text())
-            self.tableWidget.removeColumn(col)
+            for col in sorted(columns, reverse=True):
+                self.data.delete_column(self.tableWidget.horizontalHeaderItem(col).text())
+                self.tableWidget.removeColumn(col)
+        except Exception as ex:
+            self.open_except_window(str(ex))
 
     def update_table(self, df):
         self.tableWidget.setRowCount(df.shape[0])
@@ -267,20 +412,20 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
         window = AddNoiseWindow(self)
         window.show()
 
-    def save(self):
-        with open(self.path[:-4] + "_2.csv", 'w') as f:
-            f.write(str(self.alpha))
-            f.write("\n")
-            f.write(str(self.beta))
-            f.write("\n")
-            f.write(str(self.demand))
-            f.write("\n")
-            f.write(str(self.limit))
-            f.write("\n")
-            f.write(str(self.losses))
-            f.write("\n")
-            f.write(str(self.bandwidth))
-            f.write("\n")
+    def open_hierarchy_file(self):
+        path = self.FileDialog()
+        if path != "":
+            try:
+                df = pd.read_csv(path)
+                if df.size == 0:
+                    return
+
+                self.hierarchy_data = TabularData(df)
+            except Exception as ex:
+                print(ex)
+                self.open_except_window("Неверный формат файла")
+        else:
+            self.open_except_window("Неверный формат файла")
 
     def openFile(self):
         path = self.FileDialog()
@@ -290,6 +435,15 @@ class mainWindow(QtWidgets.QMainWindow, ui_main.Ui_MainWindow):
             except Exception as ex:
                 print(ex)
                 self.open_except_window("Неверный формат файла")
+
+    def saveFile(self):
+        path = self.FileDialog(forOpen=False, fmt='csv')
+        if path != "":
+            try:
+                self.data.save(path)
+            except Exception as ex:
+                print(ex)
+                self.open_except_window("Ошибка сохранения файла")
 
     def open_except_window(self, txt=""):
         window = ExceptWindow(self, txt=txt)
